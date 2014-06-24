@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 #encoding=utf-8
 
-import sys, json, random
-import numpy as np
-from scipy import sparse
-from scipy import io
-import matplotlib.pyplot as plt
-import pdb, time
-import redis
+import sys, time, json
+import scipy.sparse
+import scipy.io
+import redis.client
+import pdb
+
 
 class MassDiffusion(object):
     """docstring for MassDiffusion"""
     def __init__(self, filepath, dataset_name, split_traintest):
         super(MassDiffusion, self).__init__()
+        # import redis.client
         self._filepath = filepath
         self.dataset_name = dataset_name
         self.split_traintest = split_traintest
@@ -21,7 +21,8 @@ class MassDiffusion(object):
         self.trainSet = {}# instance data set: {user:[item,...],...}
         self.testSet = {}
         self.instancenum = 0# num of instance
-        self.rds = redis.Redis(host="localhost", port=6379, db=1)
+        # import redis
+        # self.rds = redis.client.Redis(host="localhost", port=6379, db=0)
 
 
     def import_data(self, method="online"):
@@ -124,14 +125,14 @@ class MassDiffusion(object):
     def create_ui_matrix(self, method="online"):
         filepath = "./offline_results/%s/ui_matrix"%self.dataset_name
         if method == "online":
-            self.ui_matrix = sparse.lil_matrix((self.itemnum, self.usernum))
+            self.ui_matrix = scipy.sparse.lil_matrix((self.itemnum, self.usernum))
             iterator = self.trainSet.iteritems()
             self.trainSet = {}
             for user, item in iterator:
                 for eachitem in item:
                     self.ui_matrix[eachitem, int(user)] = 1
             try:
-                io.savemat(filepath, {"ui_matrix":self.ui_matrix}, oned_as='row')
+                scipy.io.savemat(filepath, {"ui_matrix":self.ui_matrix}, oned_as='row')
             except Exception, e:
                 print e
                 sys.exit()
@@ -139,7 +140,7 @@ class MassDiffusion(object):
         elif method == "offline":
             self.trainSet = {}
             try:
-                self.ui_matrix = io.loadmat(filepath, mat_dtype=False)["ui_matrix"]
+                self.ui_matrix = scipy.io.loadmat(filepath, mat_dtype=False)["ui_matrix"]
             except Exception,e:
                 print e
                 sys.exit()
@@ -148,23 +149,34 @@ class MassDiffusion(object):
             sys.exit()
 
 
+    # def tt(self, n):
+    #     """test"""
+    #     print "redis"
+    #     self.rds = redis.client.Redis(host="localhost", port=6379, db=0)
+    #     print self.rds.get('f')
+    #     print "sleep %s s..."%n
+    #     time.sleep(n)
+    #     a = scipy.sparse.lil_matrix((3,4))
+    #     print "done !"
+    #     return n
 
-    def calc_RAMatrix(self):
+
+    def calc_RAMatrix(self, scope, groupid):
             """genetate a Resourse-Allocation Matrix: W"""
-            t_start = time.clock()
+            self.rds = redis.client.Redis(host="localhost", port=6379, db=0)
             self.ui_matrix = self.ui_matrix.tocsr()
-            tmp = sparse.csr_matrix(self.ui_matrix.sum(0))
-            tmp2 = sparse.csr_matrix(self.ui_matrix.sum(1))
+            tmp = scipy.sparse.csr_matrix(self.ui_matrix.sum(0))
+            tmp2 = scipy.sparse.csr_matrix(self.ui_matrix.sum(1))
             data = {}
 
-            for eachitem in range(870, self.itemnum):
+            for eachitem in range(scope[0], scope[1]):
                 temp_w = (self.ui_matrix.dot((self.ui_matrix[eachitem, :]/tmp).transpose())/tmp2).transpose()
                 data[eachitem] = json.dumps(temp_w.toarray().tolist())
                 temp_w = 0
                 
-                if len(data) == 10 or eachitem == self.itemnum - 1:
+                if len(data) == 2 or eachitem == scope[1] - 1:
                     try:
-                        self.rds.mset(data)
+                        self.rds.hmset(groupid, data)
                         data = {}
                     except Exception,e:
                         print e
@@ -172,9 +184,6 @@ class MassDiffusion(object):
 
                 if eachitem % 100 == 0:
                     print eachitem
-            t_finish = time.clock()
-            print "runing time in '__get_RAMatrix'"
-            print t_finish-t_start
 
     
     def calc_RVector(self, uID):
@@ -182,10 +191,11 @@ class MassDiffusion(object):
         fVector_init = self.ui_matrix[:, uID]
         # tmp = list(self.__W.sum(1))
 
+        block_size = 5000
         fVector = {}
         for eachitem in range(self.itemnum):
             if fVector_init[eachitem, 0] == 0:
-                fVector[eachitem] = sparse.csc_matrix(json.loads(self.rds.get(eachitem))).dot(fVector_init)
+                fVector[eachitem] = scipy.sparse.csc_matrix(json.loads(self.rds.hget(int(eachitem/block_size), eachitem))).dot(fVector_init)
         return fVector
 
     def single_test(self, uID):
