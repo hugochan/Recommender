@@ -131,6 +131,7 @@ class MassDiffusion(object):
             for user, item in iterator:
                 for eachitem in item:
                     self.ui_matrix[eachitem, int(user)] = 1
+
             try:
                 scipy.io.savemat(filepath, {"ui_matrix":self.ui_matrix}, oned_as='row')
             except Exception, e:
@@ -147,43 +148,44 @@ class MassDiffusion(object):
         else:
             print "method arg error !"
             sys.exit()
+    
+        self.ui_matrix = self.ui_matrix.tocsr()
+        self.ui_matrix_sum0 = scipy.sparse.csr_matrix(self.ui_matrix.sum(0))
+        self.ui_matrix_sum1 = scipy.sparse.csr_matrix(self.ui_matrix.sum(1))
 
 
-    # def tt(self, n):
-    #     """test"""
-    #     print "redis"
-    #     self.rds = redis.client.Redis(host="localhost", port=6379, db=0)
-    #     print self.rds.get('f')
-    #     print "sleep %s s..."%n
-    #     time.sleep(n)
-    #     a = scipy.sparse.lil_matrix((3,4))
-    #     print "done !"
-    #     return n
+
+    def compute(self, n):
+        """test"""
+        print "redis"
+        self.rds = redis.client.Redis(host="localhost", port=6379, db=0)
+        print self.rds.get('f')
+        print "sleep %s s..."%n
+        time.sleep(n)
+        a = scipy.sparse.lil_matrix((3,4))
+        print "done !"
+        return n
 
 
     def calc_RAMatrix(self, scope, groupid):
             """genetate a Resourse-Allocation Matrix: W"""
-            self.rds = redis.client.Redis(host="localhost", port=6379, db=0)
-            self.ui_matrix = self.ui_matrix.tocsr()
-            tmp = scipy.sparse.csr_matrix(self.ui_matrix.sum(0))
-            tmp2 = scipy.sparse.csr_matrix(self.ui_matrix.sum(1))
-            data = {}
+            # import redis.client
+            self.rds = redis.client.Redis(host="192.168.1.106", port=6379, db=0)
 
             for eachitem in range(scope[0], scope[1]):
-                temp_w = (self.ui_matrix.dot((self.ui_matrix[eachitem, :]/tmp).transpose())/tmp2).transpose()
-                data[eachitem] = json.dumps(temp_w.toarray().tolist())
+                temp_w = (self.ui_matrix.dot((self.ui_matrix[eachitem, :]/self.ui_matrix_sum0).transpose())/self.ui_matrix_sum1).transpose()
+                data = json.dumps(temp_w.toarray().tolist())
                 temp_w = 0
                 
-                if len(data) == 2 or eachitem == scope[1] - 1:
-                    try:
-                        self.rds.hmset(groupid, data)
-                        data = {}
-                    except Exception,e:
-                        print e
-                        sys.exit()
+                try:
+                    self.rds.hset(groupid, eachitem, data)
+                    data = 0
+                except Exception, e:
+                    print e
+                    sys.exit()
 
                 if eachitem % 100 == 0:
-                    print eachitem
+                    print "key:%s,field:%s"%(groupid, eachitem)
 
     
     def calc_RVector(self, uID):
@@ -191,7 +193,7 @@ class MassDiffusion(object):
         fVector_init = self.ui_matrix[:, uID]
         # tmp = list(self.__W.sum(1))
 
-        block_size = 5000
+        block_size = 10000
         fVector = {}
         for eachitem in range(self.itemnum):
             if fVector_init[eachitem, 0] == 0:

@@ -49,36 +49,75 @@ class RunRecommender(object):
         # calc RAMatrix
         t0 = time.clock()
         # using parallel computing
-        self.threadcnt = 0
-        threadList = []
-        block_size = 5000
+        block_size = 500
         task_num = int(self.recommender.itemnum/block_size)
         job_server = pp.Server()# require parallel python
 
-        pdb.set_trace()
-        
-        for eachtask in range(task_num):
-            job = job_server.submit(func=self.recommender.calc_RAMatrix, args=((eachtask*block_size, (eachtask+1)*block_size), eachtask), depfuncs=(), modules=("redis.client.Redis", "scipy.sparse", "scipy.io", "json", "sys"))
-            threadList.append(RunningThread(target=self.para_calc_RAMatrix,\
-                name="para_calc_RAMatrix:task_%s"%eachtask,\
-                args=(job,)))
+        # pdb.set_trace()
+        tasknum_per_batch = 3
+        batch_num = int(task_num/tasknum_per_batch)
+        for each in range(batch_num):
+            threadList = []
+            threadcnt = 0
+            for eachtask in range(each*tasknum_per_batch, (each+1)*tasknum_per_batch):
+                job = job_server.submit(func=self.recommender.calc_RAMatrix, args=((eachtask*block_size, (eachtask+1)*block_size), eachtask), depfuncs=(), modules=("redis.client", "scipy.sparse", "scipy.io", "json", "sys"))
+                time.sleep(2)
+                threadList.append(RunningThread(target=self.para_calc_RAMatrix,\
+                    name="para_calc_RAMatrix:task_%s"%eachtask,\
+                    args=(job,)))
+
+            
+            self.threadcnt = len(threadList)
+            for eachthread in threadList:
+                eachthread.start()
+
+            while self.threadcnt:
+                for eachthread in threadList:
+                    eachthread.join(0)
+                time.sleep(10)
+
+            print "task:"%eachtask
+
+        if task_num - batch_num*tasknum_per_batch != 0:
+            threadList = []
+            threadcnt = 0
+            for eachtask in range(batch_num*tasknum_per_batch, task_num):
+                job = job_server.submit(func=self.recommender.calc_RAMatrix, args=((eachtask*block_size, (eachtask+1)*block_size), eachtask), depfuncs=(), modules=("redis.client", "scipy.sparse", "scipy.io", "json", "sys"))
+                time.sleep(2)
+                threadList.append(RunningThread(target=self.para_calc_RAMatrix,\
+                    name="para_calc_RAMatrix:task_%s"%eachtask,\
+                    args=(job,)))
+
+            self.threadcnt = len(threadList)
+            for eachthread in threadList:
+                eachthread.start()
+
+            while self.threadcnt:
+                for eachthread in threadList:
+                    eachthread.join(0)
+                time.sleep(10)
+            
+            print "task:"%eachtask
+
 
         if self.recommender.itemnum - task_num*block_size != 0:
-            job = job_server.submit(func=self.recommender.calc_RAMatrix, args=(((eachtask+1)*block_size, self.recommender.itemnum), eachtask+1), depfuncs=(), modules=("redis.client.Redis", "scipy.sparse", "scipy.io", "json", "sys"))
+            threadList = []
+            threadcnt = 0
+            job = job_server.submit(func=self.recommender.calc_RAMatrix, args=(((eachtask+1)*block_size, self.recommender.itemnum), eachtask+1), depfuncs=(), modules=("redis.client", "scipy.sparse", "scipy.io", "json", "sys"))
+            time.sleep(2)
             threadList.append(RunningThread(target=self.para_calc_RAMatrix,\
                 name="para_calc_RAMatrix:task_%s"%(eachtask+1),\
                 args=(job,)))
-
-        pdb.set_trace()
-        
-        self.threadcnt = len(threadList)
-        for eachthread in threadList:
-            eachthread.start()
-
-        while self.threadcnt:
+            
+            self.threadcnt = len(threadList)
             for eachthread in threadList:
-                eachthread.join(0)
-            time.sleep(5)
+                eachthread.start()
+
+            while self.threadcnt:
+                for eachthread in threadList:
+                    eachthread.join(0)
+                time.sleep(10)
+
 
         t1 = time.clock()
         print "calc_RAMatrix costs: %ss"%(t1-t0)
