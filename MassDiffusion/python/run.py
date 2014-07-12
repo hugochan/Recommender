@@ -103,12 +103,12 @@ class RunRecommender(object):
         task_num = int(self.recommender.usernum/block_size)
         job_server = pp.Server()# require parallel python
 
-        tasknum_per_batch = 10
+        tasknum_per_batch = 20
         batch_num = int(task_num/tasknum_per_batch)
         for each in range(0, batch_num):
             for eachtask in range(each*tasknum_per_batch, (each+1)*tasknum_per_batch):
                 job = job_server.submit(func=self.recommender.predict, \
-                    args=((eachtask*block_size, (eachtask+1)*block_size), eachtask), \
+                    args=((eachtask*block_size, (eachtask+1)*block_size), each), \
                         depfuncs=(), modules=("redis.client", "scipy.sparse", "scipy.io", "json", "sys", "random"), \
                             callback=self.para_predict)
 
@@ -118,7 +118,7 @@ class RunRecommender(object):
         if task_num - batch_num*tasknum_per_batch != 0:
             for eachtask in range(batch_num*tasknum_per_batch, task_num):
                 job = job_server.submit(func=self.recommender.predict, \
-                    args=((eachtask*block_size, (eachtask+1)*block_size), eachtask), \
+                    args=((eachtask*block_size, (eachtask+1)*block_size), each+1), \
                         depfuncs=(), modules=("redis.client", "scipy.sparse", "scipy.io", "json", "sys", "random"), \
                             callback=self.para_predict)
  
@@ -127,7 +127,7 @@ class RunRecommender(object):
 
         if self.recommender.usernum - task_num*block_size != 0:
             job = job_server.submit(func=self.recommender.predict, \
-                args=(((eachtask+1)*block_size, self.recommender.usernum), eachtask+1), \
+                args=(((eachtask+1)*block_size, self.recommender.usernum), each+2), \
                     depfuncs=(), modules=("redis.client", "scipy.sparse", "scipy.io", "json", "sys", "random"), \
                         callback=self.para_predict)
 
@@ -166,15 +166,42 @@ class RunRecommender(object):
 
     def calc_precision(self, l):
         t0 = time.clock()
-        precision = self.recommender.calc_precision(scope=(0, self.recommender.usernum), groupid=0, l=10)
+        precision_epl = self.recommender.calc_precision(scope=(0, self.recommender.usernum), groupid=0, l=l)
         t1 = time.clock()
-        print "precision_epl: %s"%precision
         print "calc_precision costs: %ss"%(t1-t0)
+        for k, v in precision_epl.iteritems():
+            print "precision_epl: %s    l: %s"%(v, k)
+        return precision_epl
+
+    def calc_rankingscore(self):
+        t0 = time.clock()
+        rankingscore = self.recommender.calc_rankingscore(scope=(0, self.recommender.usernum), groupid=0)
+        t1 = time.clock()
+        print "calc_rankingscore costs: %ss"%(t1-t0)
+        print "rankingscore: %s"%rankingscore
+        return rankingscore
+
+    def calc_auc(self, num_randomsample):
+        t0 = time.clock()
+        auc = self.recommender.calc_auc(scope=(0, self.recommender.usernum), groupid=0, num_randomsample=num_randomsample)
+        t1 = time.clock()
+        print "calc_auc costs: %ss"%(t1-t0)
+        print "auc: %s"%auc
+        return auc
+
+    def calc_statistics(self):
+        precision_epl = self.calc_precision(l=range(1, 11))
+        auc = self.calc_auc(10000)
+        rankingscore = self.calc_rankingscore()
+        return [precision_epl, auc, rankingscore]
 
 if __name__ == '__main__':
     myrun = RunRecommender(recommender_name="mass diffusion", arg=(\
-            "../../../../data/daduchouyangshuju1/xicichouyang/", \
-            "xici", "no"))
+            "../../../../data/daduchouyangshuju1/caixindegreelarge20/", \
+            "caixin", "no"))
     # myrun.train(100)
     myrun.test(40)
-    # myrun.calc_precision(l=10)
+    # precision_epl = myrun.calc_precision(l=range(1, 11))
+    # myrun.calc_rankingscore()
+    # myrun.calc_auc(10000)
+    myrun.calc_statistics()

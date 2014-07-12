@@ -98,7 +98,7 @@ class MassDiffusion(object):
             elif self.split_traintest == "no":
                 # read train datas
                 try:
-                    with open(self._filepath+"10000samples.txt", 'r') as f:
+                    with open(self._filepath+"10000Large20samples.txt", 'r') as f:
                         tmp_train_itemset = []# item set
                         train_instanceSet = {}
                         train_instancenum = 0
@@ -123,7 +123,7 @@ class MassDiffusion(object):
 
                 # read test datas
                 try:
-                    with open(self._filepath+"test10000samples.txt", 'r') as f:
+                    with open(self._filepath+"test10000Large20samples.txt", 'r') as f:
                         tmp_test_itemset = []# item set
                         test_instanceSet = {}
                         test_instancenum = 0
@@ -304,14 +304,16 @@ class MassDiffusion(object):
                 print e
 
     
-    def calc_RVector(self, uID, rds_ram_handler):
+    def calc_RVector(self, uID, rds_ram_handler, groupid):
         """calculate a final Resourse Vector for object user: F'"""
         fVector_init = self.ui_matrix[:, uID]
         fVector_final = scipy.sparse.csc_matrix((1, self.itemnum))
         # tmp = list(self.__W.sum(1))
 
         block_size = 100
-        for eachitem in range(self.itemnum):
+        iteritems = range(self.itemnum)
+        iteritems = (uID%2 == 0) and sorted(iteritems, reverse=True) or iteritems
+        for eachitem in iteritems:
             if fVector_init[eachitem, 0] != 0:
                 try:
                     fVector_final = fVector_final + scipy.sparse.csc_matrix(json.loads(rds_ram_handler.hget(int(eachitem/block_size), eachitem)))*fVector_init[eachitem, 0]
@@ -325,8 +327,8 @@ class MassDiffusion(object):
 
         return fVector_final
 
-    def single_predict(self, uID, rds_ram_handler):
-        fVector = self.calc_RVector(uID, rds_ram_handler)
+    def single_predict(self, uID, rds_ram_handler, groupid):
+        fVector = self.calc_RVector(uID, rds_ram_handler, groupid)
         # calc auc
         positive_itemid = self.testSet[uID][0]
         if positive_itemid >= self.itemnum:# item only appearing in test dataset
@@ -375,7 +377,7 @@ class MassDiffusion(object):
         user_predictitem = {}
         # pdb.set_trace()
         for user in range(scope[0], scope[1]):
-            [predict_item, single_rankingscore, single_auc] = self.single_predict(int(user), rds_ram)
+            [predict_item, single_rankingscore, single_auc] = self.single_predict(int(user), rds_ram, groupid)
             user_rangkingscore[user] = single_rankingscore
             user_auc[user] = single_auc
             user_predictitem[user] = predict_item
@@ -387,52 +389,105 @@ class MassDiffusion(object):
         #     sys.exit()
         return [user_predictitem, user_rangkingscore, user_auc]
 
-    def calc_precision(self, scope, groupid, l=10):
-        try:
-            assert l <= 10
-        except Exception, e:
-            print e
-            sys.exit()
-
-        try:
-            if self.dataset_name == "caixin":
-                rds_rop = redis.client.StrictRedis(host="localhost", port=6379, db=1)# result of predict
-            elif self.dataset_name == "fengniao":
-                rds_rop = redis.client.StrictRedis(host="localhost", port=6380, db=1)# result of predict
-            elif self.dataset_name == "xici":
-                rds_rop = redis.client.StrictRedis(host="localhost", port=6381, db=1)# result of predict
-            else:
-                print "dataset name arg error !"
-                sys.exit()
-        except Exception, e:
-            print e
-            sys.exit()
-
-        block_size = 40
-        precision = 0.0
-        for user in range(scope[0], scope[1]):
-            try:
-                recommend_list = json.loads(rds_rop.hget(int(user/block_size), user))[:l]
-            except Exception, e:
-                print e
-                sys.exit()
-
-            hit_count = 0.0
-            for eachitem in self.testSet[user]:    
-                if eachitem in recommend_list:
-                    hit_count += 1
-            
-            precision += hit_count/l*self.itemnum/1
-        precision /= float(scope[1]-scope[0])
-
+    def calc_precision(self, scope, groupid, l):
         filepath = "../offline_results/%s/"%self.dataset_name
         try:
-            self.store_data(json.dumps({"precision_epl":precision}), filepath + "precision_epl.json")
+            assert type(l) == type([])
+        except Exception, e:
+            print "l arg error !"
+            sys.exit()
+
+        try:
+            recommend_list = json.loads(self.read_data(filepath+"user_predictitem.json"))
         except Exception, e:
             print e
             sys.exit()
-        return precision
 
+        #calc precision
+        precision_epl = {}
+        for each_l in l:
+            precision = 0.0
+            validuser_count = 0
+            for user in range(scope[0], scope[1]):
+                positive_itemid = self.testSet[user][0]
+                if positive_itemid >= self.itemnum:
+                    pass
+                else:
+                    validuser_count += 1
+                    if positive_itemid in recommend_list[str(user)][:each_l]:
+                        precision += self.itemnum/each_l
+                    else:
+                        pass
+            precision_epl[each_l] = precision/validuser_count
+
+        try:
+            self.store_data(json.dumps({"precision_epl":precision_epl}), filepath + "precision_epl.json")
+        except Exception, e:
+            print e
+            sys.exit()
+        return precision_epl
+
+    def calc_rankingscore(self, scope, groupid):
+        filepath = "../offline_results/%s/"%self.dataset_name
+        try:
+            user_rankingscore = json.loads(self.read_data(filepath+"user_rankingscore.json"))
+        except Exception, e:
+            print e
+            sys.exit()
+
+        #calc rankingscore
+        rankingscore = 0.0
+        validuser_count = 0
+        for user in range(scope[0], scope[1]):
+            tmp_rankingscore = user_rankingscore[str(user)]
+            if tmp_rankingscore == -1:
+                pass
+            else:
+                validuser_count += 1
+                rankingscore += tmp_rankingscore
+        rankingscore /= validuser_count
+
+        try:
+            self.store_data(json.dumps({"rankingscore":rankingscore}), filepath + "rankingscore.json")
+        except Exception, e:
+            print e
+            sys.exit()
+        return rankingscore
+
+    def calc_auc(self, scope, groupid, num_randomsample):
+        filepath = "../offline_results/%s/"%self.dataset_name
+        try:
+            assert type(num_randomsample) == type(0)
+        except Exception, e:
+            print "num_randomsample arg error !"
+            sys.exit()
+
+
+        try:
+            user_auc = json.loads(self.read_data(filepath+"user_auc.json"))
+        except Exception, e:
+            print e
+            sys.exit()
+
+        # calc auc
+        auc = 0.0
+        validuser_count = 0
+        # for user in range(scope[0], scope[1]):
+        while validuser_count < num_randomsample:
+            tmp_auc = user_auc[str(random.randint(scope[0], scope[1]-1))]
+            if tmp_auc == -1:
+                pass
+            else:
+                validuser_count += 1
+                auc += tmp_auc
+        auc /= validuser_count
+
+        try:
+            self.store_data(json.dumps({"auc":auc}), filepath + "auc.json")
+        except Exception, e:
+            print e
+            sys.exit()
+        return auc
 
     def store_data(self, data, filepath):
         try:
