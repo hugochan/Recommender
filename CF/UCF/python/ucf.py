@@ -3,9 +3,7 @@
 
 import sys, time, json
 import scipy.sparse
-import scipy.io
 import numpy
-import redis.client
 import random
 import pdb
 
@@ -22,7 +20,7 @@ class ucf(object):
         self.probeset = {}
 
     def import_datas(self, method):
-        filepath = "../offline_results/ml-100k/ucf/"
+        filepath = "../offline_results/%s/ucf/"%self.dataset_name
         if method == "online":
             if self.split_trainprobe == "yes": 
                 try:
@@ -91,7 +89,114 @@ class ucf(object):
                 print "item num: %s"%self.itemnum
                 print "instance num: %s"%instancenum
 
+            elif self.split_trainprobe == "no":
+                # read train datas
+                try:
+                    with open(self._filepath+"10000samples.txt", 'r') as f:
+                        tmp_train_itemset = []# item set
+                        train_instanceset = {}
+                        train_instancenum = 0
 
+                        templine = f.readline()
+                        while(templine):
+                            train_instancenum += 1
+                            temp = templine.split('\t')[:2]
+                            user = int(temp[0])
+                            item = int(temp[1])
+                            tmp_train_itemset.append(item)
+                            try:
+                                train_instanceset[user].append(item)
+                            except:
+                                train_instanceset[user] = [item]
+                            templine = f.readline()
+                except Exception, e:
+                    print "import datas error !"
+                    print e
+                    sys.exit()
+                f.close()
+
+                # read test datas
+                try:
+                    with open(self._filepath+"test10000samples.txt", 'r') as f:
+                        tmp_test_itemset = []# item set
+                        test_instanceset = {}
+                        test_instancenum = 0
+
+                        templine = f.readline()
+                        while(templine):
+                            test_instancenum += 1
+                            temp = templine.split('\t')[:2]
+                            user = int(temp[0])
+                            item = int(temp[1])
+                            tmp_test_itemset.append(item)
+                            try:
+                                test_instanceset[user].append(item)
+                            except:
+                                test_instanceset[user] = [item]
+                            templine = f.readline()
+                except Exception, e:
+                    print "import datas error !"
+                    print e
+                    sys.exit()
+                f.close()
+
+                temp_userset = train_instanceset.keys()
+                tmp_itemset = list(set(tmp_train_itemset))# remove redundancy
+                tmp_itemset_add = list(set(tmp_test_itemset) - set(tmp_itemset))
+                self.usernum = len(temp_userset)
+                self.itemnum = len(tmp_itemset)
+                self.itemnum_add = len(tmp_itemset_add)
+
+                for user_index in range(self.usernum):
+                    self.userset[temp_userset[user_index]] = user_index
+                for item_index in range(self.itemnum):
+                    self.itemset[tmp_itemset[item_index]] = item_index
+                for item_index in range(self.itemnum_add):
+                    self.itemset[tmp_itemset_add[item_index]] = item_index + self.itemnum
+                        
+                # replace the key and value of train_instanceset with user_index and item_index
+                iterator = train_instanceset.iteritems()
+                train_instanceset = {}
+                uindex = 0
+                for k, v in iterator:
+                    for eachitem in v:
+                        try:
+                            self.trainset[uindex].append(self.itemset[eachitem])
+                        except:
+                            self.trainset[uindex] = [self.itemset[eachitem]]
+                    uindex += 1
+
+                count = 0
+                # replace the key and value of test_instanceset with user_index and item_index
+                iterator = test_instanceset.iteritems()
+                test_instanceset = {}
+                for k, v in iterator:
+                    for eachitem in v:
+                        self.probeset[self.userset[k]] = [self.itemset[eachitem]]
+                        if self.itemset[eachitem] in self.trainset[self.userset[k]]:
+                            count+=1
+                print "count %s"%count
+
+                # store
+                try:
+                    self.store_data(json.dumps(self.trainset), filepath + "trainset.json")
+                    self.store_data(json.dumps(self.probeset), filepath + "probeset.json")
+                    self.store_data(json.dumps({"usernum":self.usernum, "train itemnum":self.itemnum,\
+                        "test itemnum":self.itemnum_add, "train instancenum":train_instancenum, \
+                            "test instancenum":test_instancenum}), filepath + "statistics.json")
+                except Exception, e:
+                    print e
+                    sys.exit()
+
+                print "user num: %s"%self.usernum
+                print "trainset item num: %s"%self.itemnum
+                print "testset item added num: %s"%self.itemnum_add
+                print "trainset instance num: %s"%train_instancenum
+                print "testset instance num: %s"%test_instancenum
+
+        else:
+            print "split_trainprobe arg error !"
+            sys.exit()
 
     def create_ui_matrix(self, method):
         if method == "online":
@@ -119,22 +224,26 @@ class ucf(object):
             iid += 1
         return recommendscore
 
-    def recommend(self, scope):
-        filepath = "../offline_results/ml-100k/ucf/"
+    def recommend(self, scope, groupid):
+        filepath = "../offline_results/%s/ucf/"%self.dataset_name
         user_recommendscore = {}
         for user in range(scope[0], scope[1]):
             user_recommendscore[user] = self.calc_single_recommendscore(user)
 
         try:
-            with open(filepath+"ucf-user_recommendscore.txt", "a") as f:
+            with open(filepath+"temp/"+"ucf-user_recommendscore.txt_%s"%groupid, "w") as f:
                 for user, recommendscore in user_recommendscore.iteritems():
+                    data = []
                     for item, score in recommendscore:
-                        f.write("%s %s  %s\r\n"%(user, item, score))
+                        data.append("%s    %s    %s\n"%(user, item, score)) 
+                    f.writelines(data)
         except Exception, e:
             print e
             print "store user:%s - user:%s recommend scores error !"%(scope[0], scope[1])
             sys.exit()
+        
         f.close()
+        return 0
 
     def store_data(self, data, filepath):
         try:
@@ -161,5 +270,5 @@ class ucf(object):
 if __name__ == '__main__':
     ucf = ucf(filepath="../../../../../data/public_datas/movielens-100k/ml-100k/", dataset_name="ml-100k", split_trainprobe="yes")    
     ucf.import_datas(method="online")
-    # ucf.create_ui_matrix(method="online")
-    # ucf.recommend((0, ucf.usernum))
+    ucf.create_ui_matrix(method="online")
+    ucf.recommend((0, 20), 0)
