@@ -45,7 +45,7 @@ class metrics(object):
         self.itemnum = statistics["itemnum"]
         self.instancenum = statistics["instancenum"]
 
-    def import_recommendscore(self, filename):
+    def import_recommendscore(self, filename, sampling_times):
         user_rankingscore = {}
         user_auc = {}
         user_predictitem = {}
@@ -81,15 +81,18 @@ class metrics(object):
                         single_rankingscore = -1# invalid
                         auc = -1# invalid
                     else:
-                        negative_itemid = random.randint(0, self.itemnum-1)
-                        while negative_itemid == positive_itemid:
+                        auc = 0
+                        for each in range(sampling_times):
                             negative_itemid = random.randint(0, self.itemnum-1)
-                        if recommendscore[positive_itemid] > recommendscore[negative_itemid]:
-                            auc = 1.0
-                        elif recommendscore[positive_itemid] == recommendscore[negative_itemid]:
-                            auc = 0.5
-                        else:
-                            auc = 0.0
+                            while negative_itemid == positive_itemid:
+                                negative_itemid = random.randint(0, self.itemnum-1)
+                            if recommendscore[positive_itemid] > recommendscore[negative_itemid]:
+                                auc += 1.0
+                            elif recommendscore[positive_itemid] == recommendscore[negative_itemid]:
+                                auc += 0.5
+                            else:
+                                auc += 0.0
+                        auc /= sampling_times
 
                         recommendscore =  sorted(recommendscore.iteritems(), key=lambda d:d[1], reverse = True)
                         try:
@@ -132,15 +135,22 @@ class metrics(object):
         # calc auc
         auc = 0.0
         validuser_count = 0
-        while validuser_count < num_randomsample:
-            tmp_auc = user_auc[str(random.randint(scope[0], scope[1]-1))]
+        # while validuser_count < num_randomsample:
+        #     tmp_auc = user_auc[str(random.randint(scope[0], scope[1]-1))]
+        #     if tmp_auc == -1:
+        #         pass
+        #     else:
+        #         validuser_count += 1
+        #         auc += tmp_auc
+        # auc /= validuser_count
+        for eachuser in range(self.usernum):
+            tmp_auc = user_auc[str(eachuser)]
             if tmp_auc == -1:
                 pass
             else:
                 validuser_count += 1
                 auc += tmp_auc
-        auc /= validuser_count
-
+        auc /= validuser_count    
         try:
             self.store_data(json.dumps({"auc":auc}), self._filepath + "auc.json")
         except Exception, e:
@@ -258,6 +268,6 @@ if __name__ == '__main__':
     mymetric = metrics(filepath="../../CF/UCF/offline_results/ml-100k/tsn_ucf/", dataset_name="ml-100k", algorithm_name="tsn_ucf", decay_factor=decay_factor)
     mymetric.import_probeset()
     # mymetric.import_recommendscore("tra_ucf-user_recommendscore_%s.txt"%decay_factor)
-    mymetric.import_recommendscore("tsn_ucf-user_recommendscore.txt")
+    mymetric.import_recommendscore("tsn_ucf-user_recommendscore.txt", 20)
     mymetric.test()
     print "metrics costs %ss"%(time.clock()-t0)
