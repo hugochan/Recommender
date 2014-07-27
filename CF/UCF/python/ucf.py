@@ -22,25 +22,34 @@ class ucf(object):
     def import_datas(self, method):
         filepath = "../offline_results/%s/ucf/"%self.dataset_name
         if method == "online":
-            if self.split_trainprobe == "yes": 
+            if self.split_trainprobe == "yes":
                 try:
-                    with open(self._filepath+"u.data", 'r') as f:
+                    with open(self._filepath+"caixin_sampling_0.2.txt", 'r') as f:
                         tmp_itemset = []# item set
                         temp_instanceset = {}
                         instancenum = 0
                         templine = f.readline()
                         while(templine):
                             instancenum += 1
-                            temp = templine.split('\t')[:4]
+                            # temp = templine.split(' ')[:4]
+                            temp = templine.split('    ')[:3]
+
                             user = int(temp[0])
                             item = int(temp[1])
-                            time_stamp = int(temp[3])
+                            # time_stamp = int(temp[3])
+                            time_stamp = int(temp[2][:-1])
+
                             tmp_itemset.append(item)
-                            if int(temp[2]) >= 3:
-                                try:
-                                    temp_instanceset[user].append([item, time_stamp])
-                                except:
-                                    temp_instanceset[user] = [[item, time_stamp]]
+                            # if int(temp[2]) >= 3:
+                            #     try:
+                            #         temp_instanceset[user].append([item, time_stamp])
+                            #     except:
+                            #         temp_instanceset[user] = [[item, time_stamp]]
+                            try:
+                                temp_instanceset[user].append([item, time_stamp])
+                            except:
+                                temp_instanceset[user] = [[item, time_stamp]]
+
                             templine = f.readline()
                 except Exception, e:
                     print "import datas error !"
@@ -215,13 +224,12 @@ class ucf(object):
         return usersimilarity
 
     def calc_single_recommendscore(self, uid):
-        recommendscore = []
         usersimilarity = self.calc_usersimilarity(uid)
-        score = (usersimilarity.dot(self.ui_matrix.transpose())/(usersimilarity.sum(1)[0, 0])).toarray().tolist()[0]
-        iid = 0
-        for eachscore in score:
-            recommendscore.append((iid, eachscore))
-            iid += 1
+        total_weight = usersimilarity.sum(1)[0, 0]
+        if total_weight == 0:
+            total_weight = 1
+        score = (usersimilarity.dot(self.ui_matrix.transpose())/total_weight).toarray().tolist()[0]
+        recommendscore = zip(range(self.itemnum), score)
         return recommendscore
 
     def recommend(self, scope, groupid):
@@ -268,7 +276,7 @@ class ucf(object):
         return data
 
 if __name__ == '__main__':
-    ucf = ucf(filepath="../../../../../data/public_datas/movielens-100k/ml-100k/", dataset_name="ml-100k", split_trainprobe="yes")    
+    ucf = ucf(filepath="../../../../../data/caixin/", dataset_name="caixin", split_trainprobe="yes")    
     ucf.import_datas(method="online")
     ucf.create_ui_matrix(method="online")
-    ucf.recommend((0, 20), 0)
+    ucf.recommend((14, 15), 0)
