@@ -4,6 +4,7 @@
 import sys
 import json
 import random
+import pp
 import pdb
 
 
@@ -17,7 +18,7 @@ class metrics(object):
         self.user_predictitem = {}
         self.user_rankingscore = {}
         self.user_auc = {}
-        if self.algorithm_name == "tra_ucf":
+        if self.algorithm_name == "tra_hc":
             self.decay_factor = decay_factor
 
     def import_probeset(self):
@@ -40,80 +41,184 @@ class metrics(object):
             sys.exit()
 
         self.usernum = statistics["usernum"]
-        # self.itemnum = statistics["train itemnum"]
-        # self.instancenum = statistics["train instancenum"]
-        self.itemnum = statistics["itemnum"]
-        self.instancenum = statistics["instancenum"]
+        self.itemnum = statistics["train itemnum"]
+        self.instancenum = statistics["train instancenum"]
+        # self.itemnum = statistics["itemnum"]
+        # self.instancenum = statistics["instancenum"]
 
-    def import_recommendscore(self, filename, sampling_times):
+
+    def calc(self, triple, position, filename, sampling_times):
+        recommendscore = {}
+        user_predictitem = {}
+        user_rankingscore = {}
+        user_auc = {}
+        user = triple[0]
+        recommendscore[triple[1]] = triple[2]
+        try:
+            with open(self._filepath+filename, "r") as f:
+                f.seek(position)
+                iid = 1
+                while iid < self.itemnum:
+                    for each in range(self.usernum):
+                        templine = f.readline()
+                    temp = templine[:-1].split("    ")[:3]
+                    if int(temp[0]) != user:
+                        print "format error !"
+                        sys.exit()
+                    else:
+                        item = int(temp[1])
+                        score = float(temp[2])
+                        recommendscore[item] = score
+        except Exception, e:
+            print e
+            sys.exit()
+
+        # handle
+        positive_itemid = self.probeset[str(user)][0]
+        if positive_itemid >= self.itemnum:# item only appearing in probe dataset
+            recommendscore =  sorted(recommendscore.iteritems(), key=lambda d:d[1], reverse = True)
+            single_rankingscore = -1# invalid
+            auc = -1# invalid
+        else:
+            auc = 0
+            for each in range(sampling_times):
+                negative_itemid = random.randint(0, self.itemnum-1)
+                while negative_itemid == positive_itemid:
+                    negative_itemid = random.randint(0, self.itemnum-1)
+                if recommendscore[positive_itemid] > recommendscore[negative_itemid]:
+                    auc += 1.0
+                elif recommendscore[positive_itemid] == recommendscore[negative_itemid]:
+                    auc += 0.5
+                else:
+                    auc += 0.0
+            auc /= sampling_times
+            
+            recommendscore =  sorted(recommendscore.iteritems(), key=lambda d:d[1], reverse = True)
+            try:
+                single_rankingscore = (recommendscore.index((positive_itemid, dict(recommendscore)[positive_itemid])) + 1)/float(len(recommendscore))
+            except Exception, e:
+                single_rankingscore = -1# invalid
+        
+        user_predictitem[user] = [each[0] for each in recommendscore[:20]]
+        user_rankingscore[user] = single_rankingscore
+        user_auc[user] = auc
+        try:
+            with open(self._filepath+"user_%s.txt"%user, "w") as f:
+                pass
+        except:
+            print "user:%s error !"%user
+            sys.exit()
+        f.close()
+        return [user_predictitem, user_rankingscore, user_auc]
+
+    def para_statistics(self, result):
+        self.user_predictitem.update(result[0])
+        self.user_rankingscore.update(result[1])
+        self.user_auc.update(result[2])
+
+
+    def import_recommendscore(self, filename, format, sampling_times):
         user_rankingscore = {}
         user_auc = {}
         user_predictitem = {}
 
         try:
             with open(self._filepath+filename, "r") as f:
-                templine = f.readline()
-                while (templine):
-                    # read user by user
-                    recommendscore = {}
-                    temp = templine[:-1].split("    ")[:3]
-                    user = int(temp[0])
-                    item = int(temp[1])
-                    score = float(temp[2])
-                    recommendscore[item] = score
-                    
-                    iid = 1
-                    while iid < self.itemnum:
-                        templine = f.readline()
+                if format == "user_based":
+                    templine = f.readline()
+                    while (templine):
+                        # read user by user
+                        recommendscore = {}
                         temp = templine[:-1].split("    ")[:3]
-                        if int(temp[0]) != user:
-                            print "recommendscore file format error !"
-                            sys.exit()
+                        user = int(temp[0])
                         item = int(temp[1])
                         score = float(temp[2])
                         recommendscore[item] = score
-                        iid += 1
+                        
+                        iid = 1
+                        while iid < self.itemnum:
+                            templine = f.readline()
+                            temp = templine[:-1].split("    ")[:3]
+                            if int(temp[0]) != user:
+                                print "recommendscore file format error !"
+                                sys.exit()
+                            item = int(temp[1])
+                            score = float(temp[2])
+                            recommendscore[item] = score
+                            iid += 1
 
-                    # handle
-                    positive_itemid = self.probeset[str(user)][0]
-                    if positive_itemid >= self.itemnum:# item only appearing in probe dataset
-                        recommendscore =  sorted(recommendscore.iteritems(), key=lambda d:d[1], reverse = True)
-                        single_rankingscore = -1# invalid
-                        auc = -1# invalid
-                    else:
-                        auc = 0
-                        for each in range(sampling_times):
-                            negative_itemid = random.randint(0, self.itemnum-1)
-                            while negative_itemid == positive_itemid:
-                                negative_itemid = random.randint(0, self.itemnum-1)
-                            if recommendscore[positive_itemid] > recommendscore[negative_itemid]:
-                                auc += 1.0
-                            elif recommendscore[positive_itemid] == recommendscore[negative_itemid]:
-                                auc += 0.5
-                            else:
-                                auc += 0.0
-                        auc /= sampling_times
-
-                        recommendscore =  sorted(recommendscore.iteritems(), key=lambda d:d[1], reverse = True)
-                        try:
-                            single_rankingscore = (recommendscore.index((positive_itemid, dict(recommendscore)[positive_itemid])) + 1)/float(len(recommendscore))
-                        except Exception, e:
+                        # handle
+                        positive_itemid = self.probeset[str(user)][0]
+                        if positive_itemid >= self.itemnum:# item only appearing in probe dataset
+                            recommendscore =  sorted(recommendscore.iteritems(), key=lambda d:d[1], reverse = True)
                             single_rankingscore = -1# invalid
+                            auc = -1# invalid
+                        else:
+                            auc = 0
+                            for each in range(sampling_times):
+                                negative_itemid = random.randint(0, self.itemnum-1)
+                                while negative_itemid == positive_itemid:
+                                    negative_itemid = random.randint(0, self.itemnum-1)
+                                if recommendscore[positive_itemid] > recommendscore[negative_itemid]:
+                                    auc += 1.0
+                                elif recommendscore[positive_itemid] == recommendscore[negative_itemid]:
+                                    auc += 0.5
+                                else:
+                                    auc += 0.0
+                            auc /= sampling_times
 
-                    user_predictitem[user] = [each[0] for each in recommendscore[:20]]
-                    user_rankingscore[user] = single_rankingscore
-                    user_auc[user] = auc
+                            recommendscore =  sorted(recommendscore.iteritems(), key=lambda d:d[1], reverse = True)
+                            try:
+                                single_rankingscore = (recommendscore.index((positive_itemid, dict(recommendscore)[positive_itemid])) + 1)/float(len(recommendscore))
+                            except Exception, e:
+                                single_rankingscore = -1# invalid
 
+                        user_predictitem[user] = [each[0] for each in recommendscore[:20]]
+                        user_rankingscore[user] = single_rankingscore
+                        user_auc[user] = auc
+
+                        templine = f.readline()
+                
+                elif format == "item_based":
+                    pdb.set_trace()
+                    user_list = []
+                    # job_server = pp.Server()# require parallel python
                     templine = f.readline()
+                    while (templine):
+                        temp = templine[:-1].split("    ")[:3]
+                        user = int(temp[0])
+                        item = int(temp[1])
+                        score = float(temp[2])
+                        if user not in user_list:
+                            job = job_server.submit(func=self.calc, \
+                                args=((user, item, score), f.tell(), filename, sampling_times), \
+                                    depfuncs=(), modules=("random",), \
+                                        callback=self.para_statistics)
+                            user_list.append(user)
+                        if len(user_list) == self.usernum:
+                            break
+                        templine = f.readline()
+                    job_server.wait()
+                else:
+                    print "format arg error !"
+                    sys.exit()
         except Exception, e:
             print e
             sys.exit()
         f.close()
 
         try:
-            self.store_data(json.dumps(user_predictitem), self._filepath + "user_predictitem.json")
-            self.store_data(json.dumps(user_rankingscore), self._filepath + "user_rankingscore.json")
-            self.store_data(json.dumps(user_auc), self._filepath + "user_auc.json")
+            if format == "user_based":
+                self.store_data(json.dumps(user_predictitem), self._filepath + "user_predictitem.json")
+                self.store_data(json.dumps(user_rankingscore), self._filepath + "user_rankingscore.json")
+                self.store_data(json.dumps(user_auc), self._filepath + "user_auc.json")
+            elif format == "time_based":
+                self.store_data(json.dumps(self.user_predictitem), self._filepath + "user_predictitem.json")
+                self.store_data(json.dumps(self.user_rankingscore), self._filepath + "user_rankingscore.json")
+                self.store_data(json.dumps(self.user_auc), self._filepath + "user_auc.json")
+            else:
+                print "format arg error !"
+                sys.exit()
         except Exception, e:
             print e
             sys.exit()
@@ -231,7 +336,7 @@ class metrics(object):
             print "item num: %s"%self.itemnum
             print "instance num: %s"%self.instancenum
             print "algorithm: %s"%self.algorithm_name
-            if self.algorithm_name == "tra_ucf":
+            if self.algorithm_name == "tra_hc":
                 print "decay factor: %s"%self.decay_factor
             print "auc: %s"%auc
             for k, v in precision_epl.iteritems():
@@ -262,12 +367,12 @@ class metrics(object):
         return data
 
 if __name__ == '__main__':
-    decay_factor = -0.01
+    decay_factor = -0.5
     import time
     t0=time.clock()
-    mymetric = metrics(filepath="../../CF/UCF/offline_results/ml-100k/tsn_ucf/", dataset_name="ml-100k", algorithm_name="tsn_ucf", decay_factor=decay_factor)
+    mymetric = metrics(filepath="../../HeatConduction/offline_results/caixin/hc/", dataset_name="caixin", algorithm_name="hc", decay_factor=decay_factor)
     mymetric.import_probeset()
     # mymetric.import_recommendscore("tra_ucf-user_recommendscore_%s.txt"%decay_factor)
-    mymetric.import_recommendscore("tsn_ucf-user_recommendscore.txt", 20)
+    mymetric.import_recommendscore("hc-item_recommendscore_0.txt", "item_based", 50)
     mymetric.test()
     print "metrics costs %ss"%(time.clock()-t0)
